@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статистика сообщений</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>📨 Статистика сообщений</h1>
+
+    <p><b>📌 Количество отправленных сообщений:</b> {{ total_messages }}</p>
+    <p><b>📩 Количество ответов:</b> {{ total_replies }}</p>
+
+    <h2>📊 Итерации</h2>
+    <p><b>🔹 Первая итерация:</b> {{ iteration_1 }}</p>
+    <p><b>🔸 Вторая итерация:</b> {{ iteration_2 }}</p>
+    <p><b>🔺 Третья итерация:</b> {{ iteration_3 }}</p>
+    <p><b>✅ Вступили в группу:</b> {{ final_joined }}</p>
+
+    <a href="/">🔙 Вернуться в меню</a>
+</body>
+</html>

@@ -1,0 +1,205 @@
+  <!DOCTYPE html>
+  <html lang="ru">
+  <head>
+      <meta charset="UTF-8">
+      <title>Панель сборки</title>
+      <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+      <style>
+          body {
+              font-family: Arial, sans-serif;
+              background-color: #f8f9fa; /* Светло-серый фон */
+              margin: 10px;
+              padding: 0;
+              text-align: center;
+          }
+
+          h1 {
+              font-size: 18px;
+              margin-bottom: 10px;
+              color: #343a40; /* Темно-серый цвет */
+          }
+
+          p a {
+              text-decoration: none;
+              background-color: #6c757d; /* Серый цвет для кнопки */
+              color: white;
+              padding: 6px 10px;
+              border-radius: 5px;
+              font-size: 12px;
+          }
+
+          table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px; /* Уменьшенный размер шрифта */
+              background: white;
+              border-radius: 8px;
+              overflow: hidden;
+              box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.1);
+              margin-bottom: 20px;
+          }
+
+          th, td {
+              border: 1px solid #dee2e6; /* Светло-серая граница */
+              padding: 6px; /* Уменьшенные отступы */
+              text-align: center;
+          }
+
+          th {
+              background-color: #495057; /* Темно-серый цвет для заголовков */
+              color: white;
+              font-weight: bold;
+          }
+
+          tr:nth-child(even) {
+              background-color: #f8f9fa; /* Светло-серый фон для четных строк */
+          }
+
+          tr:hover {
+              background-color: #e9ecef; /* Серый фон при наведении */
+          }
+
+          .fixed-message {
+              background-color: #fff3cd; /* Светло-желтый фон для фиксированного сообщения */
+              font-weight: bold;
+          }
+
+          button {
+              background: none;
+              border: none;
+              cursor: pointer;
+              font-size: 12px; /* Увеличенный размер шрифта */
+          }
+
+          .edit-link {
+              text-decoration: none;
+              color: #0d6efd; /* Синий цвет для ссылки редактирования */
+              font-size: 12px; /* Увеличенный размер шрифта */
+              margin-right: 5px;
+          }
+
+          .delete-btn {
+              color: #dc3545; /* Красный цвет для кнопки удаления */
+              font-size: 14px; /* Увеличенный размер шрифта */
+              transition: color 0.3s ease; /* Плавное изменение цвета */
+          }
+
+          .delete-btn:hover {
+              color: #a71d2a; /* Темно-красный цвет при наведении */
+          }
+
+          .theme-toggle-wrapper {
+              position: absolute;
+              top: 10px;
+              right: 10px;
+          }
+
+          .back-link {
+              display: inline-block;
+              margin-top: 10px;
+              background-color: #e9ecef; /* Серый фон */
+              padding: 5px 10px;
+              border: 1px solid #ced4da; /* Серая граница */
+              text-decoration: none;
+              color: #495057; /* Темно-серый цвет текста */
+              border-radius: 5px;
+          }
+
+          .flashes {
+              list-style: none;
+              padding: 0;
+              margin: 10px 0;
+          }
+
+          .flashes li {
+              padding: 10px;
+              margin: 5px 0;
+              border-radius: 5px;
+              font-size: 12px;
+          }
+
+          .flashes .success {
+              background-color: #d4edda; /* Зеленый фон для успешных сообщений */
+              color: #155724; /* Темно-зеленый текст */
+          }
+
+          .flashes .error {
+              background-color: #f8d7da; /* Красный фон для ошибок */
+              color: #721c24; /* Темно-красный текст */
+          }
+      </style>
+  </head>
+  <body>
+
+      <h1>🛠 Панель сборки</h1>
+
+      <p><a href="{{ url_for('create_template') }}">➕ Добавить сообщение</a></p>
+
+      <table>
+          <thead>
+              <tr>
+                  <th>№</th>
+                  <th>Тип</th>
+                  <th>Текст</th>
+                  <th>Ожидать ответ?</th>
+                  <th>Файл</th>
+                  <th>Действия</th>
+              </tr>
+          </thead>
+          <tbody>
+          {% if all_templates %}
+            {% for row in all_templates | sort(attribute='id') %}  <!-- Сортировка по id -->
+              <tr class="{% if loop.index == 1 %}fixed-message{% endif %}">
+                <td>{{ loop.index }}</td>
+                <td>{{ row[1] }}</td>
+                <td>{{ row[2] }}</td>
+                <td>{{ "Да" if row[3] else "Нет" }}</td>
+                <td>
+                  {% if row[4] %}
+                    {% set file_path = row[4] %}
+                    {% set file_name = file_path.split('/')[-1] %} <!-- Извлекаем имя файла -->
+                    {{ file_name }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  <a href="{{ url_for('edit_template', iteration=row[0]) }}" class="edit-link">✏️</a>
+                  {% if loop.index != 1 %}
+                  <form action="{{ url_for('delete_template_route', iteration=row[0]) }}" method="POST" class="delete-form" style="display:inline;">
+                    <button type="submit" class="delete-btn" onclick="return confirm('Удалить сообщение №{{ loop.index }}?');">🗑</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6">Нет сообщений</td></tr>
+          {% endif %}
+          </tbody>
+      </table>
+
+      <br>
+      <a href="/" class="back-link">← Меню</a>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <ul class="flashes">
+            {% for category, message in messages %}
+              <li class="{{ category }}">{{ message }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
+
+      <div class="theme-toggle-wrapper">
+          <input type="checkbox" id="theme-toggle" class="theme-toggle" />
+          <label for="theme-toggle" class="theme-toggle-label">
+              <span class="theme-toggle-ball"></span>
+          </label>
+      </div>
+
+      <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+  </body>
+  </html>

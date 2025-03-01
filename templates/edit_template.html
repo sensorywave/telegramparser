@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{% if template_data %}Редактирование{% else %}Создание{% endif %} сообщения</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f8f9fa;
+            margin: 20px;
+            padding: 0;
+        }
+        
+        .form-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            font-size: 20px;
+            color: #343a40;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .video-submenu {
+            display: none;
+            margin-top: 15px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .category-circle {
+            width: 25px;
+            height: 25px;
+            background: #e9ecef;
+            border-radius: 50%;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 10px;
+            transition: background 0.3s;
+        }
+
+        select, textarea, input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0 15px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+        }
+
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .message-number {
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #495057;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        {% if template_data %}
+        <h1>✏️ Редактирование сообщения №{{ template_data.iteration }}</h1>
+        {% else %}
+        <h1>✨ Создание сообщения №{{ next_number }}</h1>
+        {% endif %}
+
+        <div class="message-number">
+            {% if template_data %}
+                Текущий номер: {{ template_data.iteration }}
+            {% else %}
+                Присваиваемый номер: {{ next_number }}
+            {% endif %}
+        </div>
+
+        <form method="POST" enctype="multipart/form-data">
+            <label>Тип сообщения:</label>
+            <select name="message_type" id="messageType">
+                <option value="text">Текст</option>
+                <option value="photo">Фото</option>
+                <option value="video">Видео ▼</option>
+                <option value="voice">Голосовое</option>
+            </select>
+
+            <div class="video-submenu" id="videoSubmenu">
+                <label>Категория видео:
+                    <select name="video_category" id="videoCategory">
+                        <option value="promo">Промо</option>
+                        <option value="tutorial">Обучение</option>
+                        <option value="event">Событие</option>
+                    </select>
+                    <div class="category-circle" id="categoryCircle"></div>
+                </label>
+            </div>
+
+            <label>Содержание сообщения:</label>
+            <textarea name="message_content" rows="4">{% if template_data %}{{ template_data.message_content }}{% endif %}</textarea>
+
+            <div id="fileUpload" style="display: none;">
+                <label>Загрузить файл:</label>
+                <input type="file" name="file">
+                {% if template_data and template_data.file_path %}
+                    <p>Текущий файл: {{ template_data.file_path.split('/')[-1] }}</p>
+                {% endif %}
+            </div>
+
+            <label>
+                <input type="checkbox" name="wait_for_reply" {% if template_data and template_data.wait_for_reply %}checked{% endif %}>
+                Ожидать ответа
+            </label>
+
+            <br><br>
+            <button type="submit">Сохранить</button>
+        </form>
+
+        <a href="{{ url_for('build_panel') }}" class="back-link">← Назад к панели</a>
+    </div>
+
+    <script>
+        const messageType = document.getElementById('messageType');
+        const fileUpload = document.getElementById('fileUpload');
+        const videoSubmenu = document.getElementById('videoSubmenu');
+        const videoCategory = document.getElementById('videoCategory');
+        const categoryCircle = document.getElementById('categoryCircle');
+
+        function updateForm() {
+            // Управление полем загрузки файла
+            fileUpload.style.display = messageType.value !== 'text' ? 'block' : 'none';
+            
+            // Управление подменю видео
+            videoSubmenu.style.display = messageType.value === 'video' ? 'block' : 'none';
+        }
+
+        // Обработчик категории видео
+        videoCategory.addEventListener('change', () => {
+            const colors = {
+                promo: '#ff6b6b',
+                tutorial: '#4dabf7',
+                event: '#69db7c'
+            };
+            categoryCircle.style.backgroundColor = colors[videoCategory.value];
+        });
+
+        // Инициализация формы
+        document.addEventListener('DOMContentLoaded', () => {
+            updateForm();
+            if(messageType.value === 'video') videoCategory.dispatchEvent(new Event('change'));
+            
+            // Восстановление состояния при редактировании
+            {% if template_data %}
+                messageType.value = '{{ template_data.message_type }}';
+                updateForm();
+                if('{{ template_data.video_category }}') {
+                    videoCategory.value = '{{ template_data.video_category }}';
+                    videoCategory.dispatchEvent(new Event('change'));
+                }
+            {% endif %}
+        });
+
+        messageType.addEventListener('change', updateForm);
+    </script>
+</body>
+</html>

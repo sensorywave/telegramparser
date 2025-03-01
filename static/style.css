@@ -1,0 +1,157 @@
+/* 🌟 Общий стиль страницы */
+body {
+    font-family: 'Arial', sans-serif;
+    text-align: center;
+    margin: 0;
+    padding: 20px;
+    background-color: #f8f9fa;
+    color: #333;
+}
+
+/* 📌 Заголовки */
+h1, h2 {
+    color: #007bff;
+    margin-bottom: 15px;
+}
+
+/* 📜 Таблица */
+table {
+    width: 90%;
+    margin: 20px auto;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* 🔹 Заголовки таблицы */
+th {
+    background-color: #007bff;
+    color: white;
+    padding: 12px;
+    text-transform: uppercase;
+}
+
+/* 🔸 Ячейки таблицы */
+td {
+    padding: 10px;
+    border: 1px solid #ddd;
+}
+
+/* 🟢 Чередование цветов строк */
+tr:nth-child(even) {
+    background-color: #f2f2f2;
+}
+
+/* ✨ Кнопки */
+a, button {
+    display: inline-block;
+    margin-top: 15px;
+    padding: 12px 20px;
+    background: #007bff;
+    color: white;
+    text-decoration: none;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: 0.3s ease-in-out;
+}
+
+a:hover, button:hover {
+    background: #0056b3;
+}
+
+/* 📝 Поля ввода */
+input, select {
+    width: 90%;
+    padding: 8px;
+    margin: 10px auto;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    display: block;
+}
+
+/* ✅ Чекбоксы */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+/* 🏆 Карточки */
+.card {
+    background: white;
+    padding: 20px;
+    margin: 15px auto;
+    width: 80%;
+    border-radius: 10px;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* 📲 Адаптивность для мобильных устройств */
+@media (max-width: 768px) {
+    table, input, select, button {
+        width: 100%;
+    }
+    
+    .card {
+        width: 95%;
+    }
+}
+
+ /* Уведомления */
+ .notification {
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px;
+    text-align: center;
+    border-radius: 5px;
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    z-index: 1000;
+}
+
+.notification.error {
+    background-color: #f44336;
+}
+
+/* Добавление отступа */
+body {
+    padding-top: 80px;
+}
+
+button {
+    padding: 10px 20px;
+    background-color: #0088cc;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #005f99;
+}
+
+.remove-link-button {
+    cursor: pointer;
+    color: red;
+    font-size: 16px;
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+
+

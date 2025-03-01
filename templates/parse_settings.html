@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки парсинга</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        .hidden {
+            display: none;
+        }
+        .orange-button {
+            background-color: #FF9800;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+        .orange-button:hover {
+            background-color: #F57C00;
+        }
+        .link-container {
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            position: relative;
+        }
+        #add-link-button {
+            cursor: pointer;
+            color: green;
+            font-size: 20px;
+            display: block; /* Занимает всю ширину */
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .remove-link-button {
+            cursor: pointer;
+            color: red;
+            font-size: 16px;
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+        .remove-link-button:hover {
+            color: darkred;
+        }
+        #link-fields-container {
+            counter-reset: link-counter;
+        }
+        .link-container::before {
+            counter-increment: link-counter;
+            content: "Ссылка " counter(link-counter) ":";
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .button-container {
+            text-align: center;
+        }
+        /* Дополнительные стили для отступа сверху у блока, чтобы крестик не перекрывал содержимое */
+        .link-container {
+            position: relative;
+            padding-top: 30px;
+        }
+        .history-link {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 5px 10px;
+            background-color: #eee;
+            border: 1px solid #ccc;
+            text-decoration: none;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Настройки парсинга</h1>
+
+    <form method="POST" action="{{ url_for('parse_settings') }}" id="settings-form">
+        <input type="hidden" name="action" value="save_settings">
+
+        <div id="link-fields-container">
+            <!-- Здесь будут динамически добавляться поля для ссылок -->
+        </div>
+
+        <span id="add-link-button"><i class="fas fa-plus-circle"></i> Добавить чат</span>
+        <p id="limit-message" style="color: red; display: none;">Можно добавить только до 5 чатов.</p>
+
+        <div class="button-container">
+            <button type="submit">Сохранить настройки</button>
+        </div>
+    </form>
+
+    <div class="button-container">
+        <form method="POST" action="{{ url_for('parse_settings') }}">
+            <input type="hidden" name="action" value="start_parsing">
+            <button type="submit" class="orange-button">Собрать информацию</button>
+        </form>
+    </div>
+
+    <!-- Новая кнопка-переход на страницу истории настроек -->
+    <div class="button-container">
+        <a href="{{ url_for('settings_history') }}" class="history-link">История настроек</a>
+    </div>
+
+    <a href="{{ url_for('index') }}">Вернуться в меню</a>
+
+    <script>
+        const linkFieldsContainer = document.getElementById('link-fields-container');
+        const addLinkButton = document.getElementById('add-link-button');
+        const limitMessage = document.getElementById('limit-message');
+        const form = document.getElementById('settings-form');
+        let linkCount = 0;
+        const maxLinks = 5;
+
+        function addLinkField() {
+            if (linkCount >= maxLinks) {
+                limitMessage.style.display = 'block';
+                addLinkButton.style.display = 'none';
+                return;
+            }
+
+            limitMessage.style.display = 'none';
+            addLinkButton.style.display = 'inline';
+
+            const i = linkCount;
+            const linkContainer = document.createElement('div');
+            linkContainer.classList.add('link-container');
+
+            linkContainer.innerHTML = `
+                <button type="button" class="remove-link-button" data-index="${i}"><i class="fas fa-times"></i></button>
+                <label for="link${i}">Ссылка (t.me/xxxx):</label>
+                <input type="text" id="link${i}" name="link${i}">
+                <select name="type${i}">
+                    <option value="group">Группа</option>
+                    <option value="channel">Канал</option>
+                </select>
+                <div id="group_menu_${i}" class="hidden group-menu">
+                    <h3>Настройки парсинга групп:</h3>
+                    <label><input type="radio" name="parse_mode${i}" value="all_members" checked> Все контакты</label><br>
+                    <label><input type="radio" name="parse_mode${i}" value="active_members"> Контакты, писавшие сообщения</label><br>
+                    <label for="min_msgs${i}">Мин. кол-во сообщений (если «активные»):</label>
+                    <input type="number" id="min_msgs${i}" name="min_msgs${i}" value="1" min="1">
+                </div>
+                <div id="channel_menu_${i}" class="hidden channel-menu">
+                    <h3>Настройки парсинга каналов:</h3>
+                    <label><input type="radio" name="parse_mode${i}" value="commentators"> Контакты, оставлявшие комментарии</label><br>
+                    <label><input type="radio" name="parse_mode${i}" value="discussion_all"> Участники из обсуждения (все)</label><br>
+                    <label><input type="radio" name="parse_mode${i}" value="discussion_active"> Участники из обсуждения (активные)</label><br>
+                    <label for="min_discussion_msgs${i}">Мин. кол-во сообщений в обсуждении:</label>
+                    <input type="number" id="min_discussion_msgs${i}" name="min_discussion_msgs${i}" value="1" min="1">
+                </div>
+            `;
+
+            linkFieldsContainer.appendChild(linkContainer);
+            linkCount++;
+            updateAddButtonVisibility();
+
+            // Добавляем обработчики событий
+            const linkInput = linkContainer.querySelector(`#link${i}`);
+            const groupMenu = linkContainer.querySelector(`#group_menu_${i}`);
+            const channelMenu = linkContainer.querySelector(`#channel_menu_${i}`);
+            const typeSelect = linkContainer.querySelector(`[name="type${i}"]`);
+
+            function toggleMenu() {
+                const linkValue = linkInput.value.trim();
+                const typeValue = typeSelect.value;
+
+                if (linkValue !== "") {
+                    if (typeValue === "group") {
+                        groupMenu.classList.remove('hidden');
+                        channelMenu.classList.add('hidden');
+                    } else {
+                        channelMenu.classList.remove('hidden');
+                        groupMenu.classList.add('hidden');
+                    }
+                } else {
+                    groupMenu.classList.add('hidden');
+                    channelMenu.classList.add('hidden');
+                }
+            }
+
+            linkInput.addEventListener('input', toggleMenu);
+            typeSelect.addEventListener('change', toggleMenu);
+            toggleMenu();
+
+            const removeButton = linkContainer.querySelector('.remove-link-button');
+            removeButton.addEventListener('click', () => {
+                linkContainer.remove();
+                linkCount--;
+                updateAddButtonVisibility();
+                renumberLinkFields();
+            });
+        }
+
+        function updateAddButtonVisibility() {
+            if (linkCount >= maxLinks) {
+                limitMessage.style.display = 'block';
+                addLinkButton.style.display = 'none';
+            } else {
+                limitMessage.style.display = 'none';
+                addLinkButton.style.display = 'inline';
+            }
+        }
+
+        function renumberLinkFields() {
+            const linkContainers = document.querySelectorAll('.link-container');
+            linkContainers.forEach((container, index) => {
+                const newIndex = index;
+
+                // Обновляем ID и имена элементов
+                container.querySelector('label').setAttribute('for', `link${newIndex}`);
+                container.querySelector('input[type="text"]').setAttribute('id', `link${newIndex}`);
+                container.querySelector('input[type="text"]').setAttribute('name', `link${newIndex}`);
+                container.querySelector('select').setAttribute('name', `type${newIndex}`);
+
+                const groupMenu = container.querySelector(`.group-menu`);
+                groupMenu.setAttribute('id', `group_menu_${newIndex}`);
+                const channelMenu = container.querySelector(`.channel-menu`);
+                channelMenu.setAttribute('id', `channel_menu_${newIndex}`);
+
+                // Обновляем data-index кнопки удаления
+                const removeButton = container.querySelector('.remove-link-button');
+                removeButton.dataset.index = newIndex;
+
+                // Вызываем toggleMenu для обновления видимости
+                const linkInput = container.querySelector(`#link${newIndex}`);
+                const typeSelect = container.querySelector(`[name="type${newIndex}"]`);
+                toggleMenuForContainer(container, newIndex, linkInput, typeSelect);
+            });
+        }
+
+        function toggleMenuForContainer(container, index, linkInput, typeSelect) {
+            const linkValue = linkInput.value.trim();
+            const typeValue = typeSelect.value;
+            const groupMenu = container.querySelector(`#group_menu_${index}`);
+            const channelMenu = container.querySelector(`#channel_menu_${index}`);
+
+            if (linkValue !== "") {
+                if (typeValue === "group") {
+                    groupMenu.classList.remove('hidden');
+                    channelMenu.classList.add('hidden');
+                } else {
+                    channelMenu.classList.remove('hidden');
+                    groupMenu.classList.add('hidden');
+                }
+            } else {
+                groupMenu.classList.add('hidden');
+                channelMenu.classList.add('hidden');
+            }
+        }
+
+        addLinkButton.addEventListener('click', addLinkField);
+
+        // Инициализация первого поля при загрузке страницы
+        addLinkField();
+    </script>
+</body>
+</html>
+
+

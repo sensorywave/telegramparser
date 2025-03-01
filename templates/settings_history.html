@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>История настроек</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f5f5f5;
+      margin: 20px;
+      padding: 0;
+      text-align: center;
+    }
+    
+    h1 {
+      color: #333;
+    }
+
+    .history-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+
+    .history-card {
+      background-color: #fff;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      padding: 15px;
+      width: 300px;
+      transition: transform 0.3s ease;
+      text-align: left;
+      position: relative; /* Добавлено для позиционирования кнопки */
+    }
+
+    .history-card:hover {
+      transform: scale(1.02);
+    }
+
+    .history-card h3 {
+      margin: 0;
+      font-size: 18px;
+      color: #333;
+    }
+
+    .history-card p {
+      margin: 5px 0;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .back-link {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 10px 15px;
+      background-color: #007bff;
+      color: white;
+      text-decoration: none;
+      border-radius: 5px;
+      font-weight: bold;
+    }
+
+    .back-link:hover {
+      background-color: #0056b3;
+    }
+
+    /* Новые стили для кнопки удаления */
+    .delete-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #ff4444;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 25px;
+      height: 25px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.7;
+      transition: all 0.3s;
+    }
+
+    .delete-btn:hover {
+      opacity: 1;
+      transform: rotate(90deg);
+    }
+
+    /* Анимация удаления */
+    .history-card.removing {
+      transform: scale(0.9);
+      opacity: 0;
+      transition: all 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>История настроек</h1>
+
+  <div class="history-container">
+    {% for item in history %}
+    <div class="history-card">
+      <button class="delete-btn" onclick="removeCard(this)">×</button>
+      <h3>Настройки #{{ loop.index }}</h3>
+      <p><strong>Ссылка:</strong> {{ item.link }}</p>
+      <p><strong>Тип:</strong> {{ item.type }}</p>
+      <p><strong>Режим:</strong> {{ item.parse_mode }}</p>
+      <p><strong>Мин. сообщений:</strong> {{ item.min_msgs }}</p>
+      <p><strong>Мин. обсуждений:</strong> {{ item.min_discussion_msgs }}</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  <a href="{{ url_for('index') }}" class="back-link">Вернуться в меню</a>
+
+  <script>
+    function removeCard(btn) {
+      const card = btn.closest('.history-card');
+      card.classList.add('removing');
+      
+      setTimeout(() => {
+        card.remove();
+        
+        // Обновляем нумерацию оставшихся карточек
+        document.querySelectorAll('.history-card h3').forEach((title, index) => {
+          title.textContent = `Настройки #${index + 1}`;
+        });
+      }, 300);
+    }
+  </script>
+
+</body>
+</html>
