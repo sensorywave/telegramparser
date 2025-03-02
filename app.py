@@ -64,15 +64,14 @@ def init_db():
     ''')
 
     # ✅ Таблица сообщений
-    cursor.execute(''' 
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
+            user_id TEXT,
+            username TEXT,
+            iteration INTEGER,
             message_text TEXT,
-            sent_date TEXT DEFAULT CURRENT_TIMESTAMP,
-            replied INTEGER DEFAULT 0,
-            iteration INTEGER DEFAULT 1,
-            final_status TEXT DEFAULT 'pending'
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
 
@@ -130,7 +129,6 @@ MAX_HISTORY_LENGTH = 20
 
 # 🟢 Функция получения статистики парсинга
 from datetime import datetime, timedelta
-
 def get_statistics():
     """Получает статистику из базы данных."""
     conn = get_db_connection()
@@ -168,40 +166,34 @@ def get_statistics():
         "group_stats": group_stats,
     }
 
-# 🟢 Функция получения статистики сообщений
+
 def get_message_statistics():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM messages")
-    total_messages = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM messages WHERE replied = 1")
+    # Общее количество ответов (сообщения с iteration > 0)
+    cursor.execute("SELECT COUNT(*) FROM messages WHERE iteration > 0")
     total_replies = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM messages WHERE iteration = 1")
-    iteration_1 = cursor.fetchone()[0]
+    # Максимальная итерация
+    cursor.execute("SELECT MAX(iteration) FROM messages")
+    max_iteration = cursor.fetchone()[0] or 0  # Если итераций нет, возвращаем 0
 
-    cursor.execute("SELECT COUNT(*) FROM messages WHERE iteration = 2")
-    iteration_2 = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM messages WHERE iteration = 3")
-    iteration_3 = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM messages WHERE final_status = 'joined'")
-    final_joined = cursor.fetchone()[0]
+    # Количество ответов для каждой итерации
+    iteration_stats = {}
+    for i in range(1, max_iteration + 1):  # Начинаем с 1, так как нулевая итерация — это отправленные сообщения
+        cursor.execute("SELECT COUNT(*) FROM messages WHERE iteration = ?", (i,))
+        count = cursor.fetchone()[0]
+        iteration_stats[i] = count  # Ключ — номер итерации, значение — количество ответов
 
     conn.close()
 
     return {
-        "total_messages": total_messages,
         "total_replies": total_replies,
-        "iteration_1": iteration_1,
-        "iteration_2": iteration_2,
-        "iteration_3": iteration_3,
-        "final_joined": final_joined,
+        "iteration_stats": iteration_stats,  # Словарь: {итерация: количество ответов}
     }
 
+    
 # ✅ Получение шаблонов сообщений
 def get_message_templates():
     conn = get_db_connection()
@@ -319,6 +311,10 @@ def parse_settings():
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'save_settings':
+            # Очищаем предыдущие настройки
+            cursor.execute('DELETE FROM settings')
+            conn.commit()
+
             # Сохраняем настройки из формы (до 5 наборов полей)
             for i in range(5):
                 link = request.form.get(f'link{i}')
@@ -339,6 +335,8 @@ def parse_settings():
                         channel_parse_mode = request.form.get(f'parse_mode{i}', 'commentators')
                         min_discussion_msgs = request.form.get(f'min_discussion_msgs{i}', 1, type=int)
                         min_msgs = None
+
+                    # Сохраняем настройки в таблицу settings
                     cursor.execute('''
                         INSERT INTO settings (
                             group_link, channel_link,
@@ -348,18 +346,11 @@ def parse_settings():
                         VALUES (?, ?, ?, ?, ?, ?)
                     ''', (group_link, channel_link, group_parse_mode, channel_parse_mode, min_msgs, min_discussion_msgs))
                     conn.commit()
-            # Если количество записей превышает MAX_HISTORY_LENGTH – удаляем самые ранние
-            cursor.execute(f'''
-                DELETE FROM settings
-                WHERE id NOT IN (
-                    SELECT id FROM settings ORDER BY created_at DESC LIMIT {MAX_HISTORY_LENGTH}
-                )
-            ''')
-            conn.commit()
+
             flash('Настройки успешно сохранены!', 'success')
         elif action == 'start_parsing':
             try:
-                # Запуск парсера (предполагается, что файл parser.py находится в той же папке)
+                # Запуск парсера
                 parser_path = os.path.join(os.path.dirname(__file__), 'parser.py')
                 subprocess.Popen(['start', 'cmd', '/k', 'python', parser_path], shell=True)
                 flash('Парсинг запущен в новом терминале!', 'success')
@@ -370,8 +361,6 @@ def parse_settings():
         return redirect(url_for('parse_settings'))
     conn.close()
     return render_template('parse_settings.html')
-
-
 
 # Отдельный маршрут для отображения истории настроек
 @app.route('/settings_history')

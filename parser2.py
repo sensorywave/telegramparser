@@ -12,6 +12,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+last_sent_iteration = {}  # Ключ: user_id, значение: номер последней отправленной итерации
+
 # Конфигурация ботов с заранее заданными номерами телефонов
 BOTS = [
     {
@@ -116,12 +118,44 @@ def add_sent_user(user_id, username):
     cursor.execute("INSERT OR IGNORE INTO sent_users (user_id, username) VALUES (?, ?)", (str(user_id), username))
     conn.commit()
     conn.close()
+    
+def save_message(iteration, message_text, user_id=None, username=None):
+    """Сохраняет сообщение в таблицу messages."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO messages (user_id, username, iteration, message_text)
+        VALUES (?, ?, ?, ?)
+    ''', (user_id, username, iteration, message_text))
+    conn.commit()
+    conn.close()
+    logger.info(f"Сообщение записано в таблицу messages. Итерация: {iteration}, Текст: {message_text}")
 
 ###########################
 # Отправка сообщений
 ###########################
 
 async def send_message_or_file(client, user_id, template):
+    message_type = template.get("message_type", "text").lower()
+    message_content = template.get("message_content", "")
+    file_path = template.get("file_path", "")
+
+    try:
+        if message_type == "photo" and file_path:
+            abs_path = os.path.abspath(file_path)
+            if not os.path.exists(abs_path):
+                logger.error(f"Файл не найден: {abs_path}")
+                return
+            await client.send_file(user_id, abs_path, caption=message_content)
+            logger.info(f"Фото отправлено пользователю {user_id}. Файл: {abs_path}")
+        else:
+            await client.send_message(user_id, message_content)
+            logger.info(f"Сообщение отправлено пользователю {user_id}. Текст: {message_content}")
+
+        # Обновляем последнюю отправленную итерацию для пользователя
+        last_sent_iteration[user_id] = template["iteration"]
+    except Exception as e:
+        logger.error(f"Ошибка отправки сообщения для пользователя {user_id}: {e}")
     message_type = template.get("message_type", "text").lower()
     message_content = template.get("message_content", "")
     file_path = template.get("file_path", "")
@@ -174,14 +208,26 @@ async def ensure_clients():
 
 async def on_new_message(event):
     try:
-        user_id = event.sender_id
-    except Exception:
-        return
-    if user_id in pending_iterations:
-        next_index = pending_iterations.pop(user_id)
-        logger.info(f"Получен ответ от пользователя {user_id}. Продолжение рассылки через 20 секунд.")
-        asyncio.create_task(process_pending_message(event.client, user_id, next_index))
+        # Получаем текст сообщения
+        message_text = event.message.message
 
+        # Определяем номер итерации (по умолчанию 0, если информация недоступна)
+        iteration = last_sent_iteration.get(event.sender_id, 0) if event.sender_id else 0
+
+        # Проверяем, доступна ли информация о пользователе
+        if event.sender is not None:  # Проверяем, что event.sender не равен None
+            user_id = event.sender_id
+            username = event.sender.username if event.sender.username else f"user_{user_id}"
+        else:
+            user_id = None
+            username = None
+
+        # Записываем в базу данных
+        save_message(iteration, message_text, user_id, username)
+        logger.info(f"Сообщение записано в таблицу messages. Итерация: {iteration}, Текст: {message_text}")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке нового сообщения: {e}")
+        return
 async def process_pending_message(client, user_id, start_index):
     await asyncio.sleep(20)
     templates = get_message_templates()

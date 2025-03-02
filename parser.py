@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta
 import logging
 from app import init_db, get_db_connection, get_statistics, get_message_statistics
+import sys
 # -----------------------------
 # ДАННЫЕ ДЛЯ TELETHON
 # -----------------------------
@@ -557,79 +558,20 @@ async def get_participants_by_mode(chat_link, parse_mode, min_msgs, channel=Fals
 
 
 
-"""async def process_participants(participants, parse_mode, chat_link, max_work_time=None):
-    #Обработка участников и отправка сообщений на основе шаблонов.
-    
-   
-    if not participants:
-        print(f"Для {chat_link} список участников пуст (parse_mode={parse_mode}).")
-        return
 
-    # Получаем настройки бота из базы данных
-    _, contacts_count = get_bot_settings()
 
-    # Считаем общее кол-во и пишем в parsed_data
-    total_members = len(participants)
-    group_name = chat_link  # Используем ссылку на канал или группу как имя
-    new_contacts = min(total_members, contacts_count)  # Ограничиваем количество контактов
-
-    # Обновляем данные в parsed_data
-    update_parsed_data(group_name, total_members, new_contacts)
-
-    # Засекаем время начала работы
-    start_time = time.time()
-
-    # Обрабатываем только первых new_contacts участников
-    for i, participant in enumerate(participants[:new_contacts]):
-        # Проверяем, не превышено ли максимальное время работы
-        if max_work_time and (time.time() - start_time) > max_work_time:
-            print(f"Превышено максимальное время работы ({max_work_time} секунд). Остановка.")
-            break
-
-        # Фильтруем ботов и пустые first_name
-        if participant.bot or not participant.first_name:
-            continue
-
-        # Проверяем, писали ли уже
-        if has_user_received_message(participant.id):
-            continue
-
-        try:
-            # Отправляем все сообщения из шаблонов
-            await send_next_message(participant.id)
-            # Запускаем проверку вступления (необязательно)
-            asyncio.create_task(check_if_user_joined(participant.id))
-
-        except UserIsBlockedError:
-            set_user_blocked(participant.id)
-        except UserPrivacyRestrictedError:
-            set_user_blocked(participant.id)
-        except PeerIdInvalidError:
-            set_user_blocked(participant.id)
-        except Exception as e:
-            print(f"Ошибка при отправке сообщения {participant.id}: {e}")
-
-        # Делаем паузу 20 секунд после обработки каждого пользователя
-        await asyncio.sleep(20)
-
-    # Логирование результатов
-    if max_work_time and (time.time() - start_time) > max_work_time:
-        print(f"Обработано {i} участников за отведенное время ({max_work_time} секунд).")
-    else:
-        print(f"Обработаны все {new_contacts} участников.")
-    # Логирование результатов
-    if max_work_time and (time.time() - start_time) > max_work_time:
-        print(f"Обработано {i} участников за отведенное время ({max_work_time} секунд).")
-    else:
-        print(f"Обработаны все {new_contacts} участников.")"""
 async def main():
     """Основной цикл для парсинга участников."""
     try:
+        # Подключаем клиент
+        await client.start()
+        logger.info("Клиент Telethon успешно запущен.")
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
         logger.info("Получение настроек парсинга из базы данных...")
-        # Выбираем только последнюю запись из настроек (актуальные ссылки)
+        # Выбираем все записи из таблицы settings
         cursor.execute("""
             SELECT
                 group_link,
@@ -640,56 +582,42 @@ async def main():
                 min_discussion_msgs
             FROM settings
             ORDER BY id DESC
-            LIMIT 1
         """)
-        row = cursor.fetchone()
+        rows = cursor.fetchall()
         conn.close()
 
-        if row:
-            group_link, channel_link, group_parse_mode, channel_parse_mode, min_msgs, min_discussion_msgs = row
-            chat_links = []
+        if rows:
+            for row in rows:
+                group_link, channel_link, group_parse_mode, channel_parse_mode, min_msgs, min_discussion_msgs = row
+                chat_links = []
 
-            # Если задана ссылка для группы, добавляем её в список
-            if group_link:
-                chat_links.append((group_link, group_parse_mode, min_msgs, False))  # False = группа
+                # Если задана ссылка для группы, добавляем её в список
+                if group_link:
+                    chat_links.append((group_link, group_parse_mode, min_msgs, False))  # False = группа
 
-            # Если задана ссылка для канала, добавляем её в список
-            if channel_link:
-                chat_links.append((channel_link, channel_parse_mode, min_discussion_msgs, True))  # True = канал
+                # Если задана ссылка для канала, добавляем её в список
+                if channel_link:
+                    chat_links.append((channel_link, channel_parse_mode, min_discussion_msgs, True))  # True = канал
 
-            logger.info(f"Найдено {len(chat_links)} ссылок для парсинга.")
+                logger.info(f"Найдено {len(chat_links)} ссылок для парсинга.")
 
-            for chat_link, parse_mode, min_msgs, is_channel in chat_links:
-                try:
-                    logger.info(f"Начинаем парсинг для: {chat_link}, режим: {parse_mode}")
-                    await get_participants_by_mode(chat_link, parse_mode, min_msgs, is_channel)
-                    logger.info(f"Парсинг {chat_link} завершен.")
-                except Exception as e:
-                    logger.error(f"Ошибка при парсинге {chat_link}: {e}")
-                    continue  # Переходим к следующей ссылке
+                for chat_link, parse_mode, min_msgs, is_channel in chat_links:
+                    try:
+                        logger.info(f"Начинаем парсинг для: {chat_link}, режим: {parse_mode}")
+                        await get_participants_by_mode(chat_link, parse_mode, min_msgs, is_channel)
+                        logger.info(f"Парсинг {chat_link} завершен.")
+                    except Exception as e:
+                        logger.error(f"Ошибка при парсинге {chat_link}: {e}")
+                        continue  # Переходим к следующей ссылке
         else:
             logger.warning("Настройки парсинга не найдены.")
 
     except Exception as e:
         logger.error(f"Ошибка в основном цикле: {e}")
     finally:
-        logger.info("Парсинг завершен, завершение работы.")
-        try:
-            await client.disconnect()
-            logger.info("Клиент отключен.")
-        except Exception as e:
-            logger.error(f"Ошибка при отключении клиента: {e}")
-
-async def start():
-    """Запускает клиент и выполняет основной цикл."""
-    try:
-        await client.start()
-        logger.info("Клиент Telethon успешно запущен.")
-        await main()
-    except Exception as e:
-        logger.error(f"Ошибка при запуске клиента: {e}")
-    finally:
+        # Отключаем клиент только после завершения всех операций
         await client.disconnect()
+        logger.info("Клиент отключен.")
 
 if __name__ == "__main__":
-    asyncio.run(start())
+    asyncio.run(main())
