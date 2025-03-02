@@ -77,4 +77,21 @@ document.addEventListener("DOMContentLoaded", function() {
             }
         });
     }
+
+    // 5. Логика двойного клика для логаута
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        let confirmStage = 0; 
+        logoutBtn.addEventListener('click', (e) => {
+            if (confirmStage === 0) {
+                // Первый клик: меняем текст на "Точно хотите выйти?"
+                e.preventDefault();  // Отменяем переход по ссылке/действие
+                logoutBtn.textContent = "Точно хотите выйти?";
+                confirmStage = 1;
+            } else {
+                // Второй клик: выполняем реальный выход
+                window.location.href = "/logout"; 
+            }
+        });
+    }
 });

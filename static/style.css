@@ -152,6 +152,26 @@ button:hover {
     padding: 0;
 }
 
+.logout-container {
+    position: fixed;   /* Фиксированное позиционирование */
+    bottom: 10px;      /* Отступ снизу */
+    right: 10px;       /* Отступ справа */
+    z-index: 9999;     /* Поверх всех других элементов */
+}
+
+#logout-btn {
+    background-color: #dc3545; /* Пример красной кнопки */
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    color: #fff;
+    cursor: pointer;
+}
+
+#logout-btn:hover {
+    background-color: #c82333; /* Темнее при наведении */
+}
+
 /* =================================================================== */
 /*            Переключатель темы (switch) в правом верхнем углу       */
 /* =================================================================== */
