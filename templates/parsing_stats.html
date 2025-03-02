@@ -11,30 +11,29 @@
 
     <p><b>📌 Количество спаршенных групп:</b> {{ total_groups }}</p>
 
-    <h2>📋 Список групп</h2>
-    <table border="1">
-        <tr>
-            <th>Группа / канал</th>
-            <th>Собранные контакты</th>
-            <th>Общее количество</th>
-            <th>% сбора</th>
-        </tr>
-        {% for group in group_stats %}
-        <tr>
-            <td>{{ group.group_name }}</td>
-            <td>{{ group.total_contacts }}</td>
-            <td>{{ group.total_members }}</td>
-            <td>{{ group.percentage }}%</td>
-         
-        </tr>
-        {% endfor %}
-    </table>
+<h2>📋 Список групп</h2>
+<table border="1">
+    <tr>
+        <th>Группа / канал</th>
+        <th>Собранные контакты</th>
+        <th>Общее количество</th>
+        <th>% сбора</th>
+    </tr>
+    {% for group in group_stats %}
+    <tr>
+        <td>{{ group.group_name }}</td>
+        <td>{{ group.total_contacts }}</td>
+        <td>{{ group.total_members }}</td>
+        <td>
+            {{ (group.total_contacts / group.total_members * 100) | round(2) if group.total_members else 0 }}%
+        </td>
+    </tr>
+    {% endfor %}
+</table>
 
-    <h2>📈 Общая статистика</h2>
-    <p><b>📝 Общее количество собранных контактов:</b> {{ total_contacts }}</p>
-    <p><b>📅 Собрано за день:</b> {{ contacts_today }}</p>
-    <p><b>📆 Собрано за неделю:</b> {{ contacts_this_week }}</p>
+<h2>📈 Общая статистика</h2>
+<p><b>📝 Общее количество собранных контактов:</b> {{ total_contacts }}</p>
+<p><b>📅 Собрано за день:</b> {{ contacts_today }}</p>
+<p><b>📆 Собрано за неделю:</b> {{ contacts_this_week }}</p>
 
-    <a href="/">🔙 Вернуться в меню</a>
-</body>
-</html>
+<a href="/">🔙 Вернуться в меню</a>

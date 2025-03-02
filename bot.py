@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppI
 from telegram.ext import Application, CommandHandler, CallbackContext
 
 API_KEY = '7857735611:AAGbtOLVo_yIeG1-yB3E77b7rTzowg58RyI'
-app_url = "https://f009-109-110-91-207.ngrok-free.app"  # Замените на ваш сервер
+app_url = "https://9b7f-109-110-91-207.ngrok-free.app"  # Замените на ваш сервер
 
 application = Application.builder().token(API_KEY).build()
 

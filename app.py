@@ -13,12 +13,19 @@ from flask import flash, redirect, render_template, request, url_for
 import subprocess
 import telethon
 import sys
+from apscheduler.schedulers.background import BackgroundScheduler
+import psutil
+
+# Добавляем в начало кода инициализацию планировщика
+scheduler = BackgroundScheduler()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24).hex()
 bot_running = False
+parser_process = None
 
 #
 # Функция подключения к базе данных
@@ -26,6 +33,11 @@ def get_db_connection():
     conn = sqlite3.connect('participants.db', detect_types=sqlite3.PARSE_DECLTYPES)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+
+
+
 
 # Инициализация базы данных
 def init_db():
@@ -71,25 +83,29 @@ def init_db():
             message_type TEXT DEFAULT 'text',
             message_content TEXT DEFAULT NULL,
             wait_for_reply INTEGER DEFAULT 0,
-            file_path TEXT DEFAULT NULL  -- ✅ Добавляем путь к файлу
+            file_path TEXT DEFAULT NULL,
+            video_category TEXT DEFAULT NULL-- ✅ Добавляем путь к файлу
         )
     ''')
     
      # Таблица с настройками парсинга
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sender_bot_settings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_link TEXT,
-            channel_link TEXT,
-            group_parse_mode TEXT,
-            channel_parse_mode TEXT,
-            min_msgs INTEGER,
-            min_discussion_msgs INTEGER,
-            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-         
-        )
+            start_datetime TEXT,
+            contacts_count INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+""")
+        # Создание таблицы sender_status, если она не существует
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS sender_status (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        status TEXT DEFAULT 'idle',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
     ''')
-
+    
     
     
     
@@ -208,6 +224,7 @@ def update_message_template(iteration, message_type, message_content, wait_for_r
         message_content = excluded.message_content,
         wait_for_reply = excluded.wait_for_reply,
         file_path = excluded.file_path
+        video_category = excluded.video_category
     ''', (iteration, message_type, message_content, wait_for_reply, file_path))
 
     conn.commit()
@@ -269,18 +286,19 @@ def get_single_template(iteration):
     conn.close()
     return row
 
-def create_or_update_template(iteration, message_type, message_content, wait_for_reply, file_path):
+def create_or_update_template(iteration, message_type, message_content, wait_for_reply, file_path, video_category=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO message_templates (iteration, message_type, message_content, wait_for_reply, file_path)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO message_templates (iteration, message_type, message_content, wait_for_reply, file_path, video_category)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(iteration) DO UPDATE SET
           message_type = excluded.message_type,
           message_content = excluded.message_content,
           wait_for_reply = excluded.wait_for_reply,
-          file_path = excluded.file_path
-    ''', (iteration, message_type, message_content, wait_for_reply, file_path))
+          file_path = excluded.file_path,
+          video_category = excluded.video_category
+    ''', (iteration, message_type, message_content, wait_for_reply, file_path, video_category))
     conn.commit()
     conn.close()
 
@@ -380,6 +398,9 @@ def settings_history():
 
 
 
+
+
+
 # -- Панель (CRUD) --
 @app.route('/build_panel')
 def build_panel():
@@ -418,7 +439,9 @@ def create_template():
             message_type=message_type,
             message_content=message_content,
             wait_for_reply=wait_for_reply,
-            file_path=file_path
+            file_path=file_path,
+            video_category = request.form.get('video_category')
+            
         )
         
         conn.commit()
@@ -479,7 +502,7 @@ def edit_template(iteration):
             message_content=message_content,
             wait_for_reply=wait_for_reply,
             file_path=file_path,
-            video_category=video_category if message_type == 'video' else None
+            video_category=request.form.get('video_category')
         )
 
         flash(f"Сообщение №{iteration} успешно обновлено!", "success")
@@ -511,64 +534,123 @@ def get_stats():
     stats = get_statistics()
     return jsonify(stats)
 
-# Роут для страницы настроек бота отправителя
 @app.route('/sender_bot_settings', methods=['GET', 'POST'])
 def sender_bot_settings():
+    global parser_process
     if request.method == 'POST':
-        send_period = request.form.get('send_period', type=int)
+        start_datetime = request.form.get('start_datetime')
         contacts_count = request.form.get('contacts_count', type=int)
+        immediate_start = request.form.get('immediate_start') == 'on'
 
-        # Сохраняем настройки в базу данных
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(''' 
-            INSERT INTO sender_bot_settings (send_period, contacts_count)
-            VALUES (?, ?)
-        ''', (send_period, contacts_count))
+
+        if immediate_start:
+            # Если выбран немедленный запуск, устанавливаем текущее время
+            start_datetime = datetime.now().strftime("%Y-%m-%d %H:%M")
+            cursor.execute('''
+                INSERT INTO sender_bot_settings (start_datetime, contacts_count)
+                VALUES (?, ?)
+            ''', (start_datetime, contacts_count))
+            cursor.execute("UPDATE sender_status SET status = 'active'")
+            flash("Рассылка запущена немедленно!", "success")
+            # Запускаем parser.py, если процесс не запущен
+            if parser_process is None or parser_process.poll() is not None:
+                parser_process = subprocess.Popen(['python', 'parser.py'],
+                                                  creationflags=subprocess.CREATE_NEW_CONSOLE)
+        else:
+            # Если выбрана отложенная рассылка
+            if start_datetime:
+                start_time = datetime.strptime(start_datetime, "%Y-%m-%d %H:%M")
+                cursor.execute('''
+                    INSERT INTO sender_bot_settings (start_datetime, contacts_count)
+                    VALUES (?, ?)
+                ''', (start_datetime, contacts_count))
+                scheduler.add_job(activate_parsing, 'date', run_date=start_time, id='activate_parsing')
+                flash(f"Рассылка запланирована на {start_datetime}!", "success")
+            else:
+                flash("Выберите время начала рассылки или установите флажок для немедленного запуска.", "warning")
+                return redirect(url_for('sender_bot_settings'))
+
         conn.commit()
         conn.close()
 
-        flash("Настройки бота отправителя успешно сохранены!", "success")
         return redirect(url_for('sender_bot_settings'))
 
-    # Если GET-запрос, просто отображаем страницу
-    return render_template('sender_bot_settings.html')
+    # Обработка GET-запроса - получаем последние настройки и статус рассылки
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT start_datetime, contacts_count FROM sender_bot_settings ORDER BY id DESC LIMIT 1')
+    settings = cursor.fetchone()
+    cursor.execute('SELECT status FROM sender_status LIMIT 1')
+    status = cursor.fetchone()
+    conn.close()
 
-def run_bot():
-    """Запускает парсер как отдельный процесс."""
-    global bot_running
-    bot_running = True
-    try:
-        subprocess.run(["python", "parser.py"], check=True) 
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка запуска парсера: {e}")
-    finally:
-        bot_running = False
+    return render_template('sender_bot_settings.html', settings=settings, status=status['status'])
 
-@app.route('/start_bot', methods=['POST'])
-def start_bot():
-    """Запускает парсер в отдельном потоке."""
-    global bot_running
-    if not bot_running:
-        thread = Thread(target=run_bot)
-        thread.daemon = True  # Завершить поток при закрытии приложения
-        thread.start()
-        print('Парсер запущен!')
-    else:
-        print('Парсер уже запущен!')
-    return jsonify({'success': True})
+def activate_parsing():
+    """Функция, запускаемая планировщиком, для перевода статуса рассылки в 'active'."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE sender_status SET status = 'active'")
+    conn.commit()
+    conn.close()
+    print("Парсинг активирован!")
 
-# Роут для запуска парсинга
-@app.route('/start_parsinsg', methods=['POST'])
+@app.route('/start_parsing', methods=['POST'])
 def start_parsing():
-    stats = get_statistics()
-    return render_template("parsing_stats.html", **stats)
-  
+    """Маршрут для немедленного запуска рассылки."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE sender_status SET status = 'active'")
+    conn.commit()
+    conn.close()
+    global parser_process
+    if parser_process is None or parser_process.poll() is not None:
+        parser_process = subprocess.Popen(['python', 'parser2.py'],
+                                          creationflags=subprocess.CREATE_NEW_CONSOLE)
+    return jsonify({"message": "Парсинг успешно запущен!"})
 
+@app.route('/stop_sender', methods=['POST'])
+def stop_sender():
+    """Маршрут для остановки рассылки. Обновляет статус на 'idle' и завершает процесс parser.py."""
+    global parser_process
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE sender_status SET status = 'idle'")
+        conn.commit()
+        conn.close()
 
-if __name__ == '__main__':  
+        # Завершаем процесс parser.py, если он запущен
+        if parser_process and parser_process.poll() is None:
+            parent = psutil.Process(parser_process.pid)
+            for child in parent.children(recursive=True):
+                child.terminate()
+            parent.terminate()
+            parser_process = None
+
+        flash("Рассылка остановлена.", "success")
+    except Exception as e:
+        logger.error(f"Ошибка остановки: {e}")
+        flash("Ошибка при остановке", "danger")
+    return redirect(url_for('sender_bot_settings'))
+
+def init_scheduler():
+    """Инициализирует планировщик задач: если последняя запланированная рассылка активна и время больше текущего, добавляет задачу."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT start_datetime FROM sender_bot_settings ORDER BY id DESC LIMIT 1')
+    scheduled_time = cursor.fetchone()
+    cursor.execute('SELECT status FROM sender_status LIMIT 1')
+    status = cursor.fetchone()
+    conn.close()
+    if scheduled_time and status['status'] == 'active':
+        start_time = datetime.strptime(scheduled_time[0], "%Y-%m-%d %H:%M")
+        if start_time > datetime.now():
+            scheduler.add_job(activate_parsing, 'date', run_date=start_time, id='activate_parsing')
+
+if __name__ == '__main__':
     init_db()
+    init_scheduler()
     app.run(debug=True, host="0.0.0.0", port=5000)
-
-
-
