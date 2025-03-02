@@ -4,7 +4,7 @@ import asyncio
 from telethon import TelegramClient, events
 from telethon.tl.types import PeerChannel, Channel
 from telethon.errors.rpcerrorlist import UserIsBlockedError, UserPrivacyRestrictedError, PeerIdInvalidError
-from app import get_db_connection, get_statistics, get_message_statistics
+from app import get_db_connection, get_statistics, get_message_statistics, init_db
 import os
 from telethon.errors import FloodWaitError
 import time
@@ -322,29 +322,7 @@ def update_parsed_data(group_name, total_members, new_contacts):
     conn.commit()
     conn.close()
     
-    
-def get_bot_settings():
-    """Получает настройки бота из базы данных."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT
-            send_period,
-            contacts_count
-        FROM sender_bot_settings
-        ORDER BY id DESC
-        LIMIT 1
-    """)
-    row = cursor.fetchone()
-    conn.close()
 
-    if row:
-        send_period, contacts_count = row
-    else:
-        send_period = 20 * 60  # Значение по умолчанию: 20 минут
-        contacts_count = 100   # Значение по умолчанию: 100 контактов
-
-    return send_period, contacts_count
 # -----------------------------
 # ФУНКЦИИ ОТПРАВКИ/ПРОВЕРКИ
 # -----------------------------
@@ -486,9 +464,8 @@ async def process_commentators(channel_link, min_comments=0):
 
     commentators = {}
     try:
-        # Получаем последние сообщения канала
-        messages = await client.get_messages(channel, limit=100)  # Можно увеличить лимит при необходимости
-        
+        # Получаем последние сообщения канала (лимит можно увеличить при необходимости)
+        messages = await client.get_messages(channel, limit=100)
         for message in messages:
             if message.replies:
                 # Получаем комментарии к сообщению
@@ -499,8 +476,8 @@ async def process_commentators(channel_link, min_comments=0):
 
         # Фильтруем комментаторов по минимальному количеству комментариев
         active_commentators = [user_id for user_id, count in commentators.items() if count >= min_comments]
-        
-        # Получаем информацию о пользователях
+
+        # Получаем информацию о пользователях по найденным ID
         users = []
         for user_id in active_commentators:
             try:
@@ -512,11 +489,15 @@ async def process_commentators(channel_link, min_comments=0):
         logger.info(f"Найдено комментаторов: {len(users)}")
         await save_users_to_db(users, 'commentators', channel_link)
 
+        # Сохраняем результаты парсинга в таблицу parsed_data:
+        total_members = len(users)
+        new_contacts = total_members  # не используем get_bot_settings, берем полное число участников
+        update_parsed_data(channel_link, total_members, new_contacts)
+
     except Exception as e:
         logger.error(f"Ошибка при парсинге комментаторов канала {channel_link}: {e}")
-        
-        
-        
+
+
 async def get_participants_by_mode(chat_link, parse_mode, min_msgs, channel=False):
     """Парсинг участников группы или канала с учетом режима."""
     MAX_PARTICIPANTS = 100  # Ограничение на количество участников
@@ -537,6 +518,11 @@ async def get_participants_by_mode(chat_link, parse_mode, min_msgs, channel=Fals
         logger.info(f"Найдено участников: {len(participants)}")
         await save_users_to_db(participants, parse_mode, chat_link)
 
+        # Сохраняем результаты парсинга в таблицу parsed_data:
+        total_members = len(participants)
+        new_contacts = total_members  # используем общее число участников
+        update_parsed_data(chat_link, total_members, new_contacts)
+
     elif parse_mode == 'active_members':
         logger.info("Режим: active_members")
         messages = await client.get_messages(entity, limit=1000)
@@ -546,7 +532,7 @@ async def get_participants_by_mode(chat_link, parse_mode, min_msgs, channel=Fals
                 user_msg_count[msg.sender_id] = user_msg_count.get(msg.sender_id, 0) + 1
 
         active_ids = [user_id for user_id, count in user_msg_count.items() if count >= min_msgs]
-        active_ids = active_ids[:MAX_PARTICIPANTS]  # Ограничиваем количество активных участников
+        active_ids = active_ids[:MAX_PARTICIPANTS]  # Ограничиваем число активных участников
 
         participants = []
         for user_id in active_ids:
@@ -558,63 +544,17 @@ async def get_participants_by_mode(chat_link, parse_mode, min_msgs, channel=Fals
 
         logger.info(f"Найдено активных участников: {len(participants)}")
         await save_users_to_db(participants, parse_mode, chat_link)
-     # Для комментаторов:
+
+        # Сохраняем результаты парсинга в таблицу parsed_data:
+        total_members = len(participants)
+        new_contacts = total_members  # новое количество равно общему числу участников
+        update_parsed_data(chat_link, total_members, new_contacts)
+
+    # Для комментаторов (если парсится канал):
     elif parse_mode == 'commentators' and channel:
-       logger.info("Режим: commentators (канал)")
-       await process_commentators(chat_link, min_msgs)
+        logger.info("Режим: commentators (канал)")
+        await process_commentators(chat_link, min_msgs)
 
-
-    
-async def get_discussion_group(channel_link):
-    """Получает связанную группу обсуждения для канала."""
-    try:
-        # Получаем сущность канала
-        channel = await client.get_entity(channel_link)
-        
-        # Проверяем, есть ли связанная группа обсуждения
-        if hasattr(channel, 'linked_chat_id'):
-            discussion_group = await client.get_entity(channel.linked_chat_id)
-            return discussion_group
-        else:
-            print(f"У канала {channel_link} нет связанной группы обсуждения.")
-            return None
-    except Exception as e:
-        print(f"Ошибка при получении группы обсуждения: {e}")
-        return None
-
-
-async def parse_discussion_participants(chat_link, min_discussion_msgs, all_participants=True):
-    """Парсинг участников обсуждения канала."""
-    MAX_PARTICIPANTS = 100  # Ограничение на количество участников
-
-    try:
-        entity = await client.get_entity(chat_link)
-    except Exception as e:
-        logger.error(f"Ошибка при получении {chat_link}: {e}")
-        return
-
-    if hasattr(entity, 'linked_chat_id'):
-        try:
-            discussion_chat = await client.get_entity(entity.linked_chat_id)
-            participants = await client.get_participants(discussion_chat, limit=MAX_PARTICIPANTS)
-
-            if not all_participants:
-                logger.info("Парсинг активных участников обсуждения")
-                messages = await client.get_messages(discussion_chat, limit=1000)
-                user_msg_count = {}
-                for msg in messages:
-                    if msg.sender_id:
-                        user_msg_count[msg.sender_id] = user_msg_count.get(msg.sender_id, 0) + 1
-
-                active_ids = [user_id for user_id, count in user_msg_count.items() if count >= min_discussion_msgs]
-                participants = [user for user in participants if user.id in active_ids][:MAX_PARTICIPANTS]
-
-            logger.info(f"Найдено участников обсуждения: {len(participants)}")
-            await save_users_to_db(participants, 'discussion', chat_link)
-        except Exception as e:
-            logger.error(f"Ошибка при парсинге обсуждения {chat_link}: {e}")
-    else:
-        logger.info(f"У канала {chat_link} нет обсуждения.")
 
 
 """async def process_participants(participants, parse_mode, chat_link, max_work_time=None):
@@ -689,6 +629,7 @@ async def main():
         cursor = conn.cursor()
 
         logger.info("Получение настроек парсинга из базы данных...")
+        # Выбираем только последнюю запись из настроек (актуальные ссылки)
         cursor.execute("""
             SELECT
                 group_link,
@@ -699,18 +640,22 @@ async def main():
                 min_discussion_msgs
             FROM settings
             ORDER BY id DESC
+            LIMIT 1
         """)
-        rows = cursor.fetchall()
+        row = cursor.fetchone()
         conn.close()
 
-        if rows:
+        if row:
+            group_link, channel_link, group_parse_mode, channel_parse_mode, min_msgs, min_discussion_msgs = row
             chat_links = []
-            for row in rows:
-                group_link, channel_link, group_parse_mode, channel_parse_mode, min_msgs, min_discussion_msgs = row
-                if group_link:
-                    chat_links.append((group_link, group_parse_mode, min_msgs, False))  # False = группа
-                if channel_link:
-                    chat_links.append((channel_link, channel_parse_mode, min_discussion_msgs, True))  # True = канал
+
+            # Если задана ссылка для группы, добавляем её в список
+            if group_link:
+                chat_links.append((group_link, group_parse_mode, min_msgs, False))  # False = группа
+
+            # Если задана ссылка для канала, добавляем её в список
+            if channel_link:
+                chat_links.append((channel_link, channel_parse_mode, min_discussion_msgs, True))  # True = канал
 
             logger.info(f"Найдено {len(chat_links)} ссылок для парсинга.")
 
@@ -721,8 +666,7 @@ async def main():
                     logger.info(f"Парсинг {chat_link} завершен.")
                 except Exception as e:
                     logger.error(f"Ошибка при парсинге {chat_link}: {e}")
-                    continue  # Продолжаем со следующей группой/каналом
-
+                    continue  # Переходим к следующей ссылке
         else:
             logger.warning("Настройки парсинга не найдены.")
 

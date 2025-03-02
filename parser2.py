@@ -1,139 +1,283 @@
 import asyncio
 import sqlite3
 import logging
-from telethon import TelegramClient
-from telethon.tl.functions.channels import GetParticipantsRequest
-from telethon.tl.types import ChannelParticipantsSearch
-from telethon.errors import SessionPasswordNeededError, ApiIdInvalidError
+import random
+import os
+from telethon import TelegramClient, events
 
-# Настройка логгирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Настройки API для бота-парсера и ботов-рассыльщиков
-parser_api_id = 12787968
-parser_api_hash = '6ebd64c506b792c344d0ee2f9c120368'
+# Конфигурация ботов с заранее заданными номерами телефонов
+BOTS = [
+    {
+        "name": "Бот 1",
+        "api_id": 28003573,
+        "api_hash": "18f000a0ea5059fa6d22618ca51f0af2",
+        "phone": "+6283848520427"
+    },
+    {
+        "name": "Бот 2",
+        "api_id": 12787968,
+        "api_hash": "6ebd64c506b792c344d0ee2f9c120368",
+        "phone": "+79782944193"
+    }
+]
 
-sender1_api_id = 8473428
-sender1_api_hash = 'a88e8e782d29fb0a97825f4c1cbfc143'
+# Списки для приветственного сообщения
+GREETING_WORDS = ["Привет", "Здравствуйте", "Добрый день", "Приветствую", "Салют", "Хеллоу"]
+EMOJIS = ["😊", "👋", "🌟", "🚀", "🎯", "⚡️", "🔥", "💎"]
 
-sender2_api_id = 12787968
-sender2_api_hash = '6ebd64c506b792c344d0ee2f9c120368'
+###########################
+# Работа с базой данных
+###########################
 
-GROUP_TO_PARSE = '@chatikVB'
-MAX_PARTICIPANTS = 100
+def get_db_connection():
+    conn = sqlite3.connect("participants.db")
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# Создание клиентов
-parser_bot = TelegramClient('parser_bot_session', parser_api_id, parser_api_hash)
-sender_bot1 = TelegramClient('sender_bot1_session', sender1_api_id, sender1_api_hash)
-sender_bot2 = TelegramClient('sender_bot2_session', sender2_api_id, sender2_api_hash)
-
-# Подключение к базе данных
-conn = sqlite3.connect('users.db')
-cursor = conn.cursor()
-
-# Создание таблицы для хранения ID и username пользователей
-cursor.execute('''CREATE TABLE IF NOT EXISTS users
-                  (id INTEGER PRIMARY KEY, user_id INTEGER UNIQUE, processed INTEGER DEFAULT 0)''')
-
-# Добавление столбца username в таблицу users
-try:
-    cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
+# Создание/инициализация таблиц
+def create_tables():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Таблица шаблонов сообщений должна уже существовать – полей: iteration, message_type, message_content, wait_for_reply, file_path, (video_category если нужно)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS message_templates (
+            iteration INTEGER PRIMARY KEY,
+            message_type TEXT DEFAULT 'text',
+            message_content TEXT DEFAULT NULL,
+            wait_for_reply INTEGER DEFAULT 0,
+            file_path TEXT DEFAULT NULL,
+            video_category TEXT DEFAULT NULL
+        )
+    ''')
+    # Таблица статуса рассылки
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS sender_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status TEXT DEFAULT 'idle',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    # Если нет записей, вставляем начальный статус "idle"
+    cur.execute("SELECT COUNT(*) FROM sender_status")
+    if cur.fetchone()[0] == 0:
+        cur.execute("INSERT INTO sender_status (status) VALUES ('idle')")
+    # Таблица для хранения пользователей, которым уже отправлено сообщение
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS sent_users (
+            user_id TEXT PRIMARY KEY,
+            username TEXT
+        )
+    ''')
     conn.commit()
-    logger.info("Столбец 'username' успешно добавлен в таблицу 'users'")
-except sqlite3.OperationalError as e:
-    if "duplicate column name" in str(e):
-        logger.info("Столбец 'username' уже существует в таблице 'users'")
-    else:
-        logger.error(f"Ошибка при добавлении столбца 'username': {e}")
+    conn.close()
+    logger.info("Все таблицы инициализированы.")
 
-async def parse_group():
+
+def get_message_templates():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM message_templates ORDER BY iteration ASC")
+    templates = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return templates
+
+def get_sender_status():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT status FROM sender_status LIMIT 1")
+        return cursor.fetchone()["status"]
+
+def update_sender_status(new_status):
+    with get_db_connection() as conn:
+        conn.execute("UPDATE sender_status SET status = ?", (new_status,))
+        conn.commit()
+    logger.info(f"Статус рассылки обновлен на '{new_status}'")
+
+def is_user_sent(user_id):
+    """Проверяет, находится ли пользователь в таблице sent_users."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM sent_users WHERE user_id = ?", (str(user_id),))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+def add_sent_user(user_id, username):
+    """Добавляет пользователя в таблицу sent_users, чтобы не повторять рассылку."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO sent_users (user_id, username) VALUES (?, ?)", (str(user_id), username))
+    conn.commit()
+    conn.close()
+
+###########################
+# Отправка сообщений
+###########################
+
+async def send_message_or_file(client, user_id, template):
+    message_type = template.get("message_type", "text").lower()
+    message_content = template.get("message_content", "")
+    file_path = template.get("file_path", "")
+
     try:
-        async with parser_bot:
-            channel = await parser_bot.get_entity(GROUP_TO_PARSE)
-            offset = 0
-            limit = 100
-            all_participants = []
-
-            while len(all_participants) < MAX_PARTICIPANTS:
-                participants = await parser_bot(GetParticipantsRequest(
-                    channel, ChannelParticipantsSearch(''), offset=offset, limit=limit, hash=0
-                ))
-                if not participants.users:
-                    break
-                all_participants.extend(participants.users[:MAX_PARTICIPANTS - len(all_participants)])
-                offset += len(participants.users)
-                logger.info(f"Получено {len(all_participants)} участников")
-                
-                if len(all_participants) >= MAX_PARTICIPANTS:
-                    break
-
-            parsed_count = 0
-            for user in all_participants:
-                cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", 
-                               (user.id, user.username))
-                parsed_count += 1
-
-            conn.commit()
-            logger.info(f"Парсер обработал {parsed_count} участников из группы {channel.title}")
-
+        if message_type == "photo" and file_path:
+            abs_path = os.path.abspath(file_path)
+            if not os.path.exists(abs_path):
+                logger.error(f"Файл не найден: {abs_path}")
+                return
+            await client.send_file(user_id, abs_path, caption=message_content)
+            logger.info(f"Фото отправлено пользователю {user_id}. Файл: {abs_path}")
+        else:
+            await client.send_message(user_id, message_content)
+            logger.info(f"Сообщение отправлено пользователю {user_id}. Текст: {message_content}")
     except Exception as e:
-        logger.error(f"Ошибка при парсинге группы: {e}")
+        logger.error(f"Ошибка отправки сообщения для пользователя {user_id}: {e}")
 
-async def send_messages(bot, message, bot_name):
+async def wait_for_reply(client, user_id, timeout=300):
+    future = asyncio.Future()
+    @client.on(events.NewMessage(from_users=user_id))
+    async def reply_handler(event):
+        if not future.done():
+            future.set_result(event.message.message)
+        client.remove_event_handler(reply_handler, events.NewMessage)
     try:
-        async with bot:
-            for _ in range(3):
-                cursor.execute("SELECT user_id, username FROM users WHERE processed = 0 ORDER BY RANDOM() LIMIT 1")
-                user = cursor.fetchone()
-                if user:
-                    user_id, username = user
-                    try:
-                        if username:
-                            await bot.send_message(username, message)
-                        else:
-                            await bot.send_message(user_id, message)
-                        cursor.execute("UPDATE users SET processed = 1 WHERE user_id = ?", (user_id,))
-                        conn.commit()
-                        logger.info(f"{bot_name}: Отправлено сообщение пользователю {username or user_id}")
-                    except Exception as e:
-                        logger.error(f"{bot_name}: Ошибка при отправке сообщения пользователю {username or user_id}: {e}")
-                await asyncio.sleep(20)  # Пауза между отправками
-    except ApiIdInvalidError:
-        logger.error(f"{bot_name}: Неверный API ID или API Hash")
-    except SessionPasswordNeededError:
-        logger.error(f"{bot_name}: Требуется пароль двухфакторной аутентификации")
-    except Exception as e:
-        logger.error(f"{bot_name}: Неожиданная ошибка: {e}")
+        reply = await asyncio.wait_for(future, timeout=timeout)
+        return reply
+    except asyncio.TimeoutError:
+        client.remove_event_handler(reply_handler, events.NewMessage)
+        return None
 
-async def main():
-    await parse_group()
-    
-    message = input("Введите сообщение для рассылки: ")
-    
-    while True:
-        await send_messages(sender_bot1, message, "Бот 1")
-        logger.info("Ожидание 20 секунд перед сменой бота...")
-        await asyncio.sleep(20)  # Ожидание 20 секунд перед сменой бота
-        
-        await send_messages(sender_bot2, message, "Бот 2")
-        logger.info("Ожидание 20 секунд перед сменой бота...")
-        await asyncio.sleep(20)  # Ожидание 20 секунд перед сменой бота
-        
-        cursor.execute("SELECT COUNT(*) FROM users WHERE processed = 0")
-        remaining = cursor.fetchone()[0]
-        if remaining == 0:
-            logger.info("Все пользователи обработаны")
+###########################
+# Клиенты Телеграма
+###########################
+
+clients = {}  # Словарь вида {bot_name: client}
+pending_iterations = {}  # Ключ: user_id, значение: индекс следующей итерации
+
+async def ensure_clients():
+    for bot in BOTS:
+        session_name = f"session_{bot['name']}"
+        if bot['name'] not in clients:
+            client = TelegramClient(session_name, bot["api_id"], bot["api_hash"])
+            await client.start(phone=bot["phone"])
+            logger.info(f"{bot['name']} успешно авторизован.")
+            clients[bot['name']] = client
+            client.add_event_handler(on_new_message, events.NewMessage)
+    return clients
+
+async def on_new_message(event):
+    try:
+        user_id = event.sender_id
+    except Exception:
+        return
+    if user_id in pending_iterations:
+        next_index = pending_iterations.pop(user_id)
+        logger.info(f"Получен ответ от пользователя {user_id}. Продолжение рассылки через 20 секунд.")
+        asyncio.create_task(process_pending_message(event.client, user_id, next_index))
+
+async def process_pending_message(client, user_id, start_index):
+    await asyncio.sleep(20)
+    templates = get_message_templates()
+    for i in range(start_index, len(templates)):
+        template = templates[i]
+        await send_message_or_file(client, user_id, template)
+        logger.info(f"(pending) Отправлена итерация {template['iteration']} пользователю {user_id}.")
+        if int(template.get("wait_for_reply", 0)) == 1:
+            pending_iterations[user_id] = i + 1
             break
         else:
-            logger.info(f"Осталось обработать {remaining} пользователей")
+            await asyncio.sleep(5)
+
+###########################
+# Основной цикл рассылки
+###########################
+
+async def round_robin_sending():
+    await ensure_clients()
+    templates = get_message_templates()
+    
+    while True:
+        if get_sender_status() != "active":
+            logger.info("Рассылка не активна. Ожидание активации...")
+            await asyncio.sleep(5)
+            continue
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id, username FROM users")
+            users = [dict(row) for row in cursor.fetchall()]
+        
+        if not users:
+            logger.info("Нет пользователей для рассылки. Ожидание 60 секунд...")
+            await asyncio.sleep(60)
+            continue
+        
+        logger.info(f"Начинаем рассылку для {len(users)} пользователей.")
+        
+        for idx, user in enumerate(users):
+            # Проверяем, если пользователь уже получил сообщение, пропускаем его
+            if is_user_sent(user["user_id"]):
+                logger.info(f"Пользователь {user['username'] or user['user_id']} уже получил сообщение. Пропускаем.")
+                continue
+
+            bot_names = list(clients.keys())
+            bot_name = bot_names[idx % len(bot_names)]
+            client = clients[bot_name]
+            user_identifier = user["username"] or str(user["user_id"])
+            logger.info(f"{bot_name} обрабатывает пользователя {user_identifier}.")
+
+            # Отправка приветственного сообщения
+            greeting_message = f"{random.choice(GREETING_WORDS)}! {random.choice(EMOJIS)}"
+            try:
+                await client.send_message(user_identifier, greeting_message)
+                logger.info(f"{bot_name}: Приветственное сообщение отправлено пользователю {user_identifier}.")
+            except Exception as e:
+                logger.error(f"{bot_name}: Ошибка отправки приветственного сообщения пользователю {user_identifier}: {e}")
+            
+            # После отправки приветственного сообщения добавляем пользователя в таблицу, чтобы не отправлять повторно
+            add_sent_user(user["user_id"], user.get("username"))
+            
+            # Отправка итераций шаблонов
+            for i, template in enumerate(templates):
+                await send_message_or_file(client, user_identifier, template)
+                if int(template.get("wait_for_reply", 0)) == 1:
+                    logger.info(f"{bot_name}: Шаблон итерации {template['iteration']} требует ожидания ответа для пользователя {user_identifier}.")
+                    pending_iterations[int(user["user_id"])] = i + 1
+                    break
+                else:
+                    await asyncio.sleep(5)
+        
+        update_sender_status("idle")
+        logger.info("Рассылка завершена для всех пользователей, статус переключен в 'idle'.")
+        await asyncio.sleep(5)
+
+async def main():
+    await round_robin_sending()
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
     try:
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.close()
+        create_tables()
+        # Создаем таблицу sent_users, если её ещё нет
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS sent_users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT
+            )
+        ''')
+        conn.commit()
         conn.close()
+        logger.info("Таблица sent_users и другие таблицы инициализированы.")
+        
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Рассылка полностью остановлена.")
+    input("Нажмите Enter, чтобы выйти...")
