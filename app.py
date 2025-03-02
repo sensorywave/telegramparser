@@ -790,6 +790,7 @@ def sender_bot_settings():
     return render_template('sender_bot_settings.html', settings=settings, status=status['status'])
 
 def activate_parsing():
+
     """
     Функция активирует только последнюю запись парсинга с привязкой к настройкам.
     """
@@ -825,6 +826,12 @@ def activate_parsing():
         raise
     finally:
         conn.close()
+# TODO: вместо решения конфликта, эта штука была закоммичена. В новом куске когда не всё запускается
+#if __name__ == '__main__':  
+#    init_db()
+#    init_auth_db()
+#    app.run(debug=True, host="0.0.0.0", port=5000)
+
 
 # Также нужно обновить route для немедленного запуска
 @app.route('/start_parsing', methods=['POST'])

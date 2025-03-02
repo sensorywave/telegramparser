@@ -12,7 +12,52 @@
     <button onclick="location.href='/parsing_stats'">📑 Статистика парсинга</button>
     <button onclick="location.href='/parse_settings'">⚙️ Настройки парсинга</button>
     <button onclick="location.href='/build_panel'">🛠 Панель сборки сообщений</button>
-    <button onclick="location.href='/sender_bot_settings'">🤖 Настройка бота и запуск</button>
+    <button onclick="location.href='/sender_bot_settings'">🤖 Настройки бота отправителя</button> <!-- Новая кнопка -->
+    <button type="button" class="btn btn-success" onclick="startBot()">
+        <i class="fas fa-play"></i> Запустить парсер
+    </button>
+    <div id="bot-status">
+        <i class="fas fa-power-off"></i> Парсер остановлен.
+    </div>
+</div>
+
+<script>
+    function updateBotStatus() {
+        fetch('/get_bot_status')
+            .then(response => response.json())
+            .then(data => {
+                const statusDiv = document.getElementById('bot-status');
+                if (data.running) {
+                    statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Парсер работает...';
+                } else {
+                    statusDiv.innerHTML = '<i class="fas fa-power-off"></i> Парсер остановлен.';
+                }
+            });
+    }
+
+    function startBot() {
+        fetch('/start_bot', { method: 'POST' })
+            .then(response => {
+                updateBotStatus(); // Обновить статус сразу после запуска
+            });
+    }
+
+    // Обновлять статус каждые 5 секунд
+    setInterval(updateBotStatus, 5000);
+    updateBotStatus(); // Обновить статус при загрузке страницы
+</script>
+</body>
+    <!-- Контейнер для кнопки выхода -->
+    <div class="logout-container">
+        <button id="logout-btn">Выйти</button>
+    </div>
+    <!-- Переключатель темы (switch) в правом верхнем углу -->
+    <div class="theme-toggle-wrapper">
+        <input type="checkbox" id="theme-toggle" class="theme-toggle" />
+        <label for="theme-toggle" class="theme-toggle-label">
+            <span class="theme-toggle-ball"></span>
+        </label>
+    </div>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
