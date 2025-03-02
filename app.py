@@ -9,7 +9,7 @@ import subprocess
 import telethon
 import logging
 import subprocess
-from flask import flash, redirect, render_template, request, url_for
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 import subprocess
 import telethon
 import sys
@@ -27,7 +27,73 @@ app.secret_key = os.urandom(24).hex()
 bot_running = False
 parser_process = None
 
-#
+AUTH_DB = 'users.db'
+
+def get_auth_db_connection():
+    """Соединение с БД для хранения информации об администраторах."""
+    conn = sqlite3.connect(AUTH_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_auth_db():
+    """Создаём таблицу для хранения логина/пароля/суперадмина, если её нет."""
+    conn = get_auth_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS admin_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            superadmin INTEGER DEFAULT 0,
+            db_name TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# -----------------------------------------
+# 2) Логика определения БД для конкретного пользователя
+# -----------------------------------------
+def get_user_db_path():
+    """
+    Возвращает путь к файлу БД, зависящей от пользователя.
+    - Если пользователь супер-админ, используем participants.db (общая).
+    - Иначе используем персональную user_{username}.db
+    """
+    if 'user_id' not in session:
+        return None
+
+    conn = get_auth_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT username, superadmin, db_name FROM admin_users WHERE id = ?", (session['user_id'],))
+    user_row = c.fetchone()
+    conn.close()
+
+    if not user_row:
+        return None
+
+    username = user_row['username']
+    is_super = bool(user_row['superadmin'])
+    db_name_in_record = user_row['db_name']
+
+    # Супер-админ => общая participants.db
+    if is_super:
+        return 'participants.db'
+
+    # Если обычный админ — проверяем или создаём ему БД
+    # Если в admin_users.db_name ещё пусто, то формируем имя и записываем
+    if not db_name_in_record:
+        personal_db = f"user_{username}.db"
+        # Записываем в таблицу
+        conn2 = get_auth_db_connection()
+        c2 = conn2.cursor()
+        c2.execute("UPDATE admin_users SET db_name = ? WHERE username = ?", (personal_db, username))
+        conn2.commit()
+        conn2.close()
+        return personal_db
+    else:
+        return db_name_in_record
+
 # Функция подключения к базе данных
 def get_db_connection():
     conn = sqlite3.connect('participants.db', detect_types=sqlite3.PARSE_DECLTYPES)
@@ -125,7 +191,80 @@ def init_db():
 
 MAX_HISTORY_LENGTH = 20 
     
-    
+# -----------------------------------------
+# 3) Инициализация БД для конкретного файла (схема)
+# -----------------------------------------
+def init_db_if_needed():
+    """
+    Инициализируем структуру таблиц в персональной БД, если нужно.
+    Вызывается при каждом входе, но создаёт таблицы лишь один раз.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return  # Пользователь не залогинен или ошибка
+
+    c = conn.cursor()
+
+    # Создаем нужные таблицы, если их нет
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS parsed_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_name TEXT,
+            user_id INTEGER,
+            first_name TEXT,
+            last_name TEXT,
+            username TEXT,
+            total_contacts INTEGER DEFAULT 0,
+            total_members INTEGER DEFAULT 1, 
+            collected_date DATE DEFAULT (date('now'))
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            message_text TEXT,
+            sent_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            replied INTEGER DEFAULT 0,
+            iteration INTEGER DEFAULT 1,
+            final_status TEXT DEFAULT 'pending'
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS message_templates (
+            iteration INTEGER PRIMARY KEY,
+            message_type TEXT DEFAULT 'text',
+            message_content TEXT DEFAULT NULL,
+            wait_for_reply INTEGER DEFAULT 0,
+            file_path TEXT DEFAULT NULL
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_link TEXT,
+            channel_link TEXT,
+            group_parse_mode TEXT,
+            channel_parse_mode TEXT,
+            min_msgs INTEGER,
+            min_discussion_msgs INTEGER,
+            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sender_bot_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            send_period INTEGER,
+            contacts_count INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
 # 🟢 Функция получения статистики парсинга
 from datetime import datetime, timedelta
@@ -228,6 +367,68 @@ def add_new_iteration():
     cursor.execute("INSERT INTO message_templates (message_type, message_content, wait_for_reply) VALUES ('text', '', 0)")
     conn.commit()
     conn.close()
+
+# -----------------------------------------
+# 4) Работа сессии: проверка логина
+# -----------------------------------------
+@app.before_request
+def require_login():
+    """
+    Перед обработкой любого запроса (кроме /login) проверяем,
+    залогинен ли пользователь. Если нет — редирект на /login.
+    """
+    if request.endpoint in ('login', 'static'):
+        # Разрешаем доступ к странице логина и к статике
+        return
+    # Сюда можно добавить любые пути, которые не требуют логина (если нужны)
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """
+    Страница авторизации. Логин/пароль берём из формы,
+    проверяем в таблице admin_users (в users.db).
+    """
+    if request.method == 'POST':
+        username = request.form['username'].strip()
+        password = request.form['password'].strip()
+
+        conn_auth = get_auth_db_connection()
+        c = conn_auth.cursor()
+        c.execute("SELECT id, password FROM admin_users WHERE username = ?", (username,))
+        row = c.fetchone()
+        conn_auth.close()
+
+        if row is None:
+            flash("Неверное имя пользователя или пароль!", "error")
+            return redirect(url_for('login'))
+
+        user_id = row['id']
+        stored_pass = row['password']
+
+        if password == stored_pass:
+            # Авторизация успешна
+            session['user_id'] = user_id
+            flash("Вы успешно вошли в систему!", "success")
+
+            # Инициализируем нужные таблицы в персональной БД (или общей)
+            init_db_if_needed()
+            return redirect(url_for('index'))
+        else:
+            flash("Неверное имя пользователя или пароль!", "error")
+            return redirect(url_for('login'))
+
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """
+    Выход из учётной записи, очищаем сессию.
+    """
+    session.clear()
+    flash("Вы вышли из админ-панели.", "success")
+    return redirect(url_for('login'))
 
 # 🏠 Главная страница
 @app.route('/')
@@ -585,6 +786,11 @@ def activate_parsing():
     conn.commit()
     conn.close()
     print("Парсинг активирован!")
+# TODO: вместо решения конфликта, эта штука была закоммичена. В новом куске когда не всё запускается
+#if __name__ == '__main__':  
+#    init_db()
+#    init_auth_db()
+#    app.run(debug=True, host="0.0.0.0", port=5000)
 
 @app.route('/start_parsing', methods=['POST'])
 def start_parsing():
