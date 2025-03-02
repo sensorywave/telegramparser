@@ -6,6 +6,9 @@ body {
     padding: 20px;
     background-color: #f8f9fa;
     color: #333;
+
+    /* Добавление отступа */
+    padding-top: 80px;
 }
 
 /* 📌 Заголовки */
@@ -104,8 +107,8 @@ input, select {
     }
 }
 
- /* Уведомления */
- .notification {
+/* Уведомления */
+.notification {
     background-color: #4CAF50;
     color: white;
     padding: 10px;
@@ -123,11 +126,7 @@ input, select {
     background-color: #f44336;
 }
 
-/* Добавление отступа */
-body {
-    padding-top: 80px;
-}
-
+/* Кнопки */
 button {
     padding: 10px 20px;
     background-color: #0088cc;
@@ -153,5 +152,81 @@ button:hover {
     padding: 0;
 }
 
+/* =================================================================== */
+/*            Переключатель темы (switch) в правом верхнем углу       */
+/* =================================================================== */
+.theme-toggle-wrapper {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
 
+/* Скрываем стандартный чекбокс */
+.theme-toggle {
+    display: none;
+}
 
+/* Стилизованный переключатель */
+.theme-toggle-label {
+    width: 50px;
+    height: 26px;
+    background: #ccc;
+    display: inline-block;
+    border-radius: 50px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+/* Кружок внутри переключателя */
+.theme-toggle-ball {
+    width: 22px;
+    height: 22px;
+    background: #fff;
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: transform 0.3s;
+}
+
+/* При включённом чекбоксе (тёмная тема) */
+.theme-toggle:checked + .theme-toggle-label {
+    background: #444;
+}
+.theme-toggle:checked + .theme-toggle-label .theme-toggle-ball {
+    transform: translateX(24px);
+}
+
+/* =================================================================== */
+/*                         Тёмная тема                                 */
+/* =================================================================== */
+
+/* Для удобства сделаем переключение за счёт класса .dark-mode у body */
+.dark-mode {
+    background-color: #1c1c1c;
+    color: #ddd;
+}
+.dark-mode h1, .dark-mode h2 {
+    color: #bbb;
+}
+.dark-mode th {
+    background-color: #333;
+}
+.dark-mode a, .dark-mode button {
+    background: #333;
+    color: #fff;
+}
+.dark-mode a:hover, .dark-mode button:hover {
+    background: #555;
+}
+.dark-mode table {
+    background: #2c2c2c;
+    border: 1px solid #444;
+}
+.dark-mode td {
+    border: 1px solid #444;
+}
+.dark-mode tr:nth-child(even) {
+    background-color: #2f2f2f;
+}
