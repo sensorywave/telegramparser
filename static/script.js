@@ -28,12 +28,23 @@ function loadMessageStats() {
 document.addEventListener("DOMContentLoaded", function() {
     console.log("Mini App загружен!");
 
-    // Если мы на странице /parsing_stats, то сразу грузим статистику
+    // 1. Восстанавливаем тему из localStorage
+    const themeToggle = document.getElementById('theme-toggle');
+    const savedTheme = localStorage.getItem('theme') || 'light';
+
+    if (savedTheme === 'dark') {
+        document.body.classList.add('dark-mode');
+        if (themeToggle) {
+            themeToggle.checked = true;  // устанавливаем чекбокс в положение "вкл"
+        }
+    }
+
+    // 2. Если мы на странице /parsing_stats, то сразу грузим статистику
     if (window.location.pathname === "/parsing_stats") {
         loadParsingStats();
     }
 
-    // Если есть форма на странице, делаем проверку на пустые поля
+    // 3. Проверяем, есть ли форма на странице (для отправки сообщений), и вешаем проверку заполнения textarea
     const form = document.querySelector("form");
     if (form) {
         form.addEventListener("submit", function(event) {
@@ -52,16 +63,17 @@ document.addEventListener("DOMContentLoaded", function() {
         });
     }
 
-    // Переключатель темы (тёмная/светлая)
-    const themeToggle = document.getElementById('theme-toggle');
+    // 4. Переключатель темы (тёмная/светлая)
     if (themeToggle) {
         themeToggle.addEventListener('change', () => {
             if (themeToggle.checked) {
+                // Включаем тёмную тему
                 document.body.classList.add('dark-mode');
-                // При желании: localStorage.setItem('theme', 'dark');
+                localStorage.setItem('theme', 'dark'); 
             } else {
+                // Выключаем тёмную тему
                 document.body.classList.remove('dark-mode');
-                // При желании: localStorage.setItem('theme', 'light');
+                localStorage.setItem('theme', 'light');
             }
         });
     }
