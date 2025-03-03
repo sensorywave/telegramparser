@@ -3,3 +3,6 @@
 ./start.sh
 ```
 
+# На сервере
+Он уже запущен как iwebix-bot.service
+
