@@ -790,32 +790,85 @@ def sender_bot_settings():
     return render_template('sender_bot_settings.html', settings=settings, status=status['status'])
 
 def activate_parsing():
-    """Функция, запускаемая планировщиком, для перевода статуса рассылки в 'active'."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE sender_status SET status = 'active'")
-    conn.commit()
-    conn.close()
-    print("Парсинг активирован!")
+
+    """
+    Функция активирует только последнюю запись парсинга с привязкой к настройкам.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Получаем последние настройки рассылки
+        cursor.execute('''
+            SELECT id, start_datetime, contacts_count 
+            FROM sender_bot_settings 
+            ORDER BY id DESC LIMIT 1
+        ''')
+        settings = cursor.fetchone()
+        
+        # Обновляем статус только для последней записи
+        cursor.execute('''
+            UPDATE sender_status 
+            SET status = 'active',
+                updated_at = CURRENT_TIMESTAMP,
+                settings_id = ?
+            WHERE id = (
+                SELECT id FROM sender_status 
+                ORDER BY id DESC LIMIT 1
+            )
+        ''', (settings['id'],))
+        
+        conn.commit()
+        logger.info("Парсинг активирован для настройки ID: %s", settings['id'])
+        
+    except Exception as e:
+        logger.error("Ошибка при активации парсинга: %s", str(e))
+        raise
+    finally:
+        conn.close()
 # TODO: вместо решения конфликта, эта штука была закоммичена. В новом куске когда не всё запускается
 #if __name__ == '__main__':  
 #    init_db()
 #    init_auth_db()
 #    app.run(debug=True, host="0.0.0.0", port=5000)
 
+
+# Также нужно обновить route для немедленного запуска
 @app.route('/start_parsing', methods=['POST'])
 def start_parsing():
     """Маршрут для немедленного запуска рассылки."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE sender_status SET status = 'active'")
-    conn.commit()
-    conn.close()
-    global parser_process
-    if parser_process is None or parser_process.poll() is not None:
-        parser_process = subprocess.Popen(['python', 'parser2.py'],
-                                          creationflags=subprocess.CREATE_NEW_CONSOLE)
-    return jsonify({"message": "Парсинг успешно запущен!"})
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Получаем ID последних настроек
+        cursor.execute('SELECT id FROM sender_bot_settings ORDER BY id DESC LIMIT 1')
+        settings = cursor.fetchone()
+        
+        # Обновляем статус с привязкой к настройкам
+        cursor.execute('''
+            UPDATE sender_status 
+            SET status = 'active',
+                updated_at = CURRENT_TIMESTAMP,
+                settings_id = ?
+            WHERE id = (
+                SELECT id FROM sender_status 
+                ORDER BY id DESC LIMIT 1
+            )
+        ''', (settings['id'],))
+        
+        conn.commit()
+        conn.close()
+
+        global parser_process
+        if parser_process is None or parser_process.poll() is not None:
+            parser_process = subprocess.Popen(['python', 'parser2.py'],
+                                            creationflags=subprocess.CREATE_NEW_CONSOLE)
+        return jsonify({"message": "Парсинг успешно запущен!"})
+        
+    except Exception as e:
+        logger.error("Ошибка при запуске парсинга: %s", str(e))
+        return jsonify({"error": "Ошибка при запуске парсинга"}), 500
 
 @app.route('/stop_sender', methods=['POST'])
 def stop_sender():
